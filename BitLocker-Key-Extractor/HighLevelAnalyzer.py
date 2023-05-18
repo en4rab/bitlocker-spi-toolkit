@@ -86,16 +86,21 @@ class Hla(HighLevelAnalyzer):
         current_transaction (Transaction): Contains the transaction to be decoded
         window (bytearray): the last WINDOW_SIZE bytes from transactions. Used to search the key
     """
-    result_types = {}
+    result_types = {
+        'key': {
+            'format': 'Found BitLocker key:, Data: {{data.key}}'
+        }
+    }
 
     state = TransactionState.READ_OPERATION
     current_transaction = None
     window = b''
 
     def __init__(self):
-        pass
+        self.first_frame_time = None
 
     def decode(self, frame: AnalyzerFrame):
+        out_frame = None
         if frame.type == 'enable':
             self._reset_state_machine()
         elif frame.type == 'disable':
@@ -103,7 +108,8 @@ class Hla(HighLevelAnalyzer):
         elif frame.type == 'result':
             mosi = frame.data['mosi'][0]
             miso = frame.data['miso'][0]
-            self._state_machine(mosi, miso, frame)
+            out_frame = self._state_machine(mosi, miso, frame)
+        return out_frame
 
     def _reset_state_machine(self):
         self.state = TransactionState.READ_OPERATION
@@ -148,11 +154,16 @@ class Hla(HighLevelAnalyzer):
             self._reset_state_machine()
             self._append_transaction()
             key = self._find_key()
+            if self.first_frame_time is None:
+                self.first_frame_time = self.current_transaction.start_time
             if key:
                 print(f'[+] Found BitLocker key: {key}')
                 self.window = b''
             if len(self.window) >= WINDOW_SIZE:
                 self.window = self.window[-WINDOW_SIZE:]
+            if key:
+                return AnalyzerFrame("key", self.first_frame_time, frame.end_time, {'key': key})
+        return None
 
     def _append_transaction(self):
         if int.from_bytes(self.current_transaction.address, "big") != TPM_DATA_FIFO_0:
