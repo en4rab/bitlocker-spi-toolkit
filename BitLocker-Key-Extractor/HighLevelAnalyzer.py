@@ -13,7 +13,7 @@ WAIT_MASK = 0x01
 WAIT_END = 0x01
 TPM_DATA_FIFO_0 = 0xd40024
 
-WINDOW_SIZE = 0x2c
+WINDOW_SIZE = 0x50  # 0x50 for tpm+pin 0x2c for tpm
 
 
 class Operation(Enum):
@@ -89,6 +89,9 @@ class Hla(HighLevelAnalyzer):
     result_types = {
         'key': {
             'format': 'Found BitLocker key:, Data: {{data.key}}'
+        },
+        'pkey': {
+            'format': 'Found BitLocker PIN key:, Data: {{data.pkey}}'
         }
     }
 
@@ -98,6 +101,7 @@ class Hla(HighLevelAnalyzer):
 
     def __init__(self):
         self.first_frame_time = None
+        pass
 
     def decode(self, frame: AnalyzerFrame):
         out_frame = None
@@ -154,15 +158,21 @@ class Hla(HighLevelAnalyzer):
             self._reset_state_machine()
             self._append_transaction()
             key = self._find_key()
+            pkey = self._find_pkey()
             if self.first_frame_time is None:
                 self.first_frame_time = self.current_transaction.start_time
             if key:
                 print(f'[+] Found BitLocker key: {key}')
                 self.window = b''
+            if pkey:
+                print(f'[+] Found BitLocker pkey: {pkey}')
+                self.window = b''
             if len(self.window) >= WINDOW_SIZE:
                 self.window = self.window[-WINDOW_SIZE:]
             if key:
                 return AnalyzerFrame("key", self.first_frame_time, frame.end_time, {'key': key})
+            if pkey:
+                return AnalyzerFrame("pkey", self.first_frame_time, frame.end_time, {'pkey': pkey})
         return None
 
     def _append_transaction(self):
@@ -176,4 +186,12 @@ class Hla(HighLevelAnalyzer):
             r'2c000[0-6]000[1-9]000[0-1]000[0-5]200000(\w{64})', data)
         if key:
             return key[0]
+        return None
+
+    def _find_pkey(self):
+        data = self.window.hex()
+        pkey = re.findall(
+            r'5000000005000000(\w{144})', data)
+        if pkey:
+            return pkey[0]
         return None
